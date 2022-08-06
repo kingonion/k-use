@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+
+# A script that helps you switch "kubeconfig" and "namespace" quickly
+
+# Copyright 2022 kingonion
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+K_USE_KUBECONFIG=""
+K_USE_NAMESPACE=""
+K_USE_USAGE=""
+K_USE_QUIT=""
+
+K_USE_PS1_BG_COLOR=$(tput setaf 1)
+K_USE_PS1_BG_RESET=$(tput sgr0)
+
+K_USE_CURRENT_CONTEXT=""
+K_USE_CURRENT_NAMESPACE=""
+
+function k::use::usage() {
+    echo "Usage: . ${BASH_SOURCE[0]} [-h | --help] | [-q | --quit] | [-k kubeconfig | --kubeconfig kubeconfig] [-n namespace | --namespace namespace]"
+}
+
+function k::use::prerequisites() {
+    # check whether it's executed with source
+    if [ "${BASH_SOURCE[0]}" -ef "${0}" ]
+    then
+        k::use::usage
+        return 1
+    fi
+
+    realpath --help &>/dev/null
+    if [ $? -ne 0 ]
+    then
+        echo "realpath is not found in the PATH, exit" >&2
+        return 1
+    fi
+
+    kubectl --help &>/dev/null
+    if [ $? -ne 0 ]
+    then
+        echo "kubectl is not found in the PATH, exit" >&2
+        return 1
+    fi
+}
+
+function k::use::arguments() {
+    while [ $# -gt 0 ]
+    do
+        case "${1}" in
+            -k|--kubeconfig)
+                K_USE_KUBECONFIG="${2}"
+                shift
+                shift
+                ;;
+            -n|--namespace)
+                K_USE_NAMESPACE="${2}"
+                shift
+                shift
+                ;;
+            -q|--quit)
+                K_USE_QUIT="true"
+                shift
+                ;;
+            -h|--help)
+                K_USE_USAGE="true"
+                shift
+                ;;
+            *)
+                k::use::usage
+                return 1
+                ;;
+        esac
+    done
+}
+
+function k::use::actions() {
+    if [ "${K_USE_USAGE}" == "true" ]
+    then
+        k::use::usage
+        return 1
+    fi
+
+    if [ "${K_USE_QUIT}" == "true" ]
+    then
+        k::use::quit
+        return 1
+    fi
+
+    if [ -z "${K_USE_KUBECONFIG}" ] && [ -z "${K_USE_NAMESPACE}" ]
+    then
+        k::use::usage
+        return 1
+    fi
+
+    k::use::kubeconfig::set || return 1
+
+    k::use::namespace::set || return 1
+}
+
+function k::use::quit() {
+    if [ -n "${K_USE_ORIGINAL_PS1}" ]
+    then
+        export PS1="${K_USE_ORIGINAL_PS1}"
+    fi
+
+    unset KUBECONFIG
+
+    unset K_USE_ORIGINAL_PS1
+    unset K_USE_KUBECONFIG
+    unset K_USE_NAMESPACE
+    unset K_USE_USAGE
+    unset K_USE_QUIT
+
+    unset K_USE_PS1_BG_COLOR
+    unset K_USE_PS1_BG_RESET
+
+    unset K_USE_CURRENT_CONTEXT
+    unset K_USE_CURRENT_NAMESPACE
+}
+
+function k::use::kubeconfig::set {
+    if [ -z "${K_USE_KUBECONFIG}" ]
+    then
+        return
+    fi
+
+    if [ ! -f "${K_USE_KUBECONFIG}" ]
+    then
+        echo "file ${K_USE_KUBECONFIG} doesn't exist" >&2
+        k::use::usage
+        return 1
+    fi
+
+    local kubeconfig_real_path=$(realpath "${K_USE_KUBECONFIG}" 2>/dev/null)
+    if [ -z "${kubeconfig_real_path}" ]
+    then
+        echo "failed to get real path for file ${K_USE_KUBECONFIG}" >&2
+        return 1
+    fi
+
+    local current_context=$(kubectl --kubeconfig "${kubeconfig_real_path}" config current-context 2>/dev/null)
+    if [ -z "${current_context}" ]
+    then
+        echo "invalid kubeconfig file ${kubeconfig_real_path}, no current context" >&2
+        return 1
+    fi
+
+    export KUBECONFIG="${kubeconfig_real_path}"
+}
+
+function k::use::namespace::set {
+    if [ -z "${K_USE_NAMESPACE}" ]
+    then
+        return
+    fi
+
+    if [ -z "${KUBECONFIG}" ]
+    then
+        echo "KUBECONFIG is not set, can't set namespace" >&2
+        k::usage:usage
+        return 1
+    fi
+
+    kubectl config set-context --current --namespace="${K_USE_NAMESPACE}" || return 1
+}
+
+function k::use::ps1() {
+    if [ -z "${KUBECONFIG}" ]
+    then
+        return
+    fi
+
+    k::use::context::get || return
+    k::use::namespace::get
+
+    local kubeconfig_file_name=$(echo -n "${KUBECONFIG}" | awk -F '/' 'NR == 1 { print $NF }')
+
+    if [ -z "${K_USE_ORIGINAL_PS1}" ]
+    then
+        export K_USE_ORIGINAL_PS1="${PS1}"
+    fi
+
+    export PS1="${K_USE_PS1_BG_COLOR}(${kubeconfig_file_name}:${K_USE_CURRENT_NAMESPACE})${K_USE_PS1_BG_RESET}${K_USE_ORIGINAL_PS1}"
+}
+
+function k::use::context::get() {
+    K_USE_CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null)
+    if [ -z "${K_USE_CURRENT_CONTEXT}" ]
+    then
+        echo "invalid kubeconfig file" >&2
+        return 1
+    fi
+}
+
+function k::use::namespace::get() {
+    K_USE_CURRENT_NAMESPACE=$(kubectl config view --raw -o jsonpath='{.contexts[?(@.name == "'"${K_USE_CURRENT_CONTEXT}"'")].context.namespace}' 2>/dev/null)
+    if [ -z "${K_USE_CURRENT_NAMESPACE}" ]
+    then
+        K_USE_CURRENT_NAMESPACE="default"
+    fi
+}
+
+function k::use::main() {
+    k::use::prerequisites || return
+
+    k::use::arguments "$@" || return
+
+    k::use::actions || return
+
+    k::use::ps1
+}
+
+k::use::main "$@"
