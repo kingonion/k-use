@@ -15,9 +15,6 @@ Here is a simple demo.
 2. Copy `k-use` to somewhere in your `PATH`
 
 ## Usage
-You can get the usage with following command.
-```sh
-. k-use -h|--help
+```text
+. k-use [-h] | [-q] | [-k kubeconfig] [-n namespace]
 ```
-
-

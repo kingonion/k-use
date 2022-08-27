@@ -21,14 +21,18 @@ K_USE_NAMESPACE=""
 K_USE_USAGE=""
 K_USE_QUIT=""
 
-K_USE_PS1_BG_COLOR=$(tput setaf 1)
+K_USE_PS1_BG_RED=$(tput setaf 1)
 K_USE_PS1_BG_RESET=$(tput sgr0)
 
 K_USE_CURRENT_CONTEXT=""
 K_USE_CURRENT_NAMESPACE=""
 
 function k::use::usage() {
-    echo "Usage: . ${BASH_SOURCE[0]} [-h | --help] | [-q | --quit] | [-k kubeconfig | --kubeconfig kubeconfig] [-n namespace | --namespace namespace]"
+    echo "Usage: . ${BASH_SOURCE[0]} [-h] | [-q] | [-k kubeconfig] [-n namespace]"
+}
+
+function k::use::error() {
+    printf "${K_USE_PS1_BG_RED}%s${K_USE_PS1_BG_RESET}\n" "$@" >&2
 }
 
 function k::use::prerequisites() {
@@ -42,14 +46,14 @@ function k::use::prerequisites() {
     realpath --help &>/dev/null
     if [ $? -ne 0 ]
     then
-        echo "realpath is not found in the PATH, exit" >&2
+        k::use::error "realpath is not found in the PATH, exit"
         return 1
     fi
 
     kubectl --help &>/dev/null
     if [ $? -ne 0 ]
     then
-        echo "kubectl is not found in the PATH, exit" >&2
+        k::use::error "kubectl is not found in the PATH, exit"
         return 1
     fi
 }
@@ -58,21 +62,21 @@ function k::use::arguments() {
     while [ $# -gt 0 ]
     do
         case "${1}" in
-            -k|--kubeconfig)
+            -k)
                 K_USE_KUBECONFIG="${2}"
                 shift
                 shift
                 ;;
-            -n|--namespace)
+            -n)
                 K_USE_NAMESPACE="${2}"
                 shift
                 shift
                 ;;
-            -q|--quit)
+            -q)
                 K_USE_QUIT="true"
                 shift
                 ;;
-            -h|--help)
+            -h)
                 K_USE_USAGE="true"
                 shift
                 ;;
@@ -109,10 +113,7 @@ function k::use::actions() {
 }
 
 function k::use::quit() {
-    if [ -n "${K_USE_ORIGINAL_PS1}" ]
-    then
-        export PS1="${K_USE_ORIGINAL_PS1}"
-    fi
+    [ -z "${K_USE_ORIGINAL_PS1}" ] || export PS1="${K_USE_ORIGINAL_PS1}"
 
     unset KUBECONFIG
 
@@ -122,7 +123,7 @@ function k::use::quit() {
     unset K_USE_USAGE
     unset K_USE_QUIT
 
-    unset K_USE_PS1_BG_COLOR
+    unset K_USE_PS1_BG_RED
     unset K_USE_PS1_BG_RESET
 
     unset K_USE_CURRENT_CONTEXT
@@ -130,29 +131,18 @@ function k::use::quit() {
 }
 
 function k::use::kubeconfig::set {
-    if [ -z "${K_USE_KUBECONFIG}" ]
-    then
-        return
-    fi
+    [ -n "${K_USE_KUBECONFIG}" ] || return 0
 
     if [ ! -f "${K_USE_KUBECONFIG}" ]
     then
-        echo "file ${K_USE_KUBECONFIG} doesn't exist" >&2
-        k::use::usage
+        k::use::error "file ${K_USE_KUBECONFIG} doesn't exist"
         return 1
     fi
 
     local kubeconfig_real_path=$(realpath "${K_USE_KUBECONFIG}" 2>/dev/null)
     if [ -z "${kubeconfig_real_path}" ]
     then
-        echo "failed to get real path for file ${K_USE_KUBECONFIG}" >&2
-        return 1
-    fi
-
-    local current_context=$(kubectl --kubeconfig "${kubeconfig_real_path}" config current-context 2>/dev/null)
-    if [ -z "${current_context}" ]
-    then
-        echo "invalid kubeconfig file ${kubeconfig_real_path}, no current context" >&2
+        k::use::error "failed to get real path for file ${K_USE_KUBECONFIG}"
         return 1
     fi
 
@@ -160,15 +150,11 @@ function k::use::kubeconfig::set {
 }
 
 function k::use::namespace::set {
-    if [ -z "${K_USE_NAMESPACE}" ]
-    then
-        return
-    fi
+    [ -n "${K_USE_NAMESPACE}" ] || return 0
 
     if [ -z "${KUBECONFIG}" ]
     then
-        echo "KUBECONFIG is not set, can't set namespace" >&2
-        k::usage:usage
+        k::use::error "KUBECONFIG is not set, can't set namespace"
         return 1
     fi
 
@@ -176,39 +162,32 @@ function k::use::namespace::set {
 }
 
 function k::use::ps1() {
-    if [ -z "${KUBECONFIG}" ]
-    then
-        return
-    fi
+    [ -n "${KUBECONFIG}" ] || return 0
 
-    k::use::context::get || return
+    k::use::context::get
     k::use::namespace::get
 
     local kubeconfig_file_name=$(echo -n "${KUBECONFIG}" | awk -F '/' 'NR == 1 { print $NF }')
 
-    if [ -z "${K_USE_ORIGINAL_PS1}" ]
-    then
-        export K_USE_ORIGINAL_PS1="${PS1}"
-    fi
+    [ -n "${K_USE_ORIGINAL_PS1}" ] || export K_USE_ORIGINAL_PS1="${PS1}"
 
-    export PS1="${K_USE_PS1_BG_COLOR}(${kubeconfig_file_name}:${K_USE_CURRENT_NAMESPACE})${K_USE_PS1_BG_RESET}${K_USE_ORIGINAL_PS1}"
+    export PS1="${K_USE_PS1_BG_RED}(${kubeconfig_file_name}:${K_USE_CURRENT_NAMESPACE})${K_USE_PS1_BG_RESET}${K_USE_ORIGINAL_PS1}"
 }
 
 function k::use::context::get() {
     K_USE_CURRENT_CONTEXT=$(kubectl config current-context 2>/dev/null)
-    if [ -z "${K_USE_CURRENT_CONTEXT}" ]
-    then
-        echo "invalid kubeconfig file" >&2
-        return 1
-    fi
+    [ -n "${K_USE_CURRENT_CONTEXT}" ] || K_USE_CURRENT_CONTEXT="N/A"
 }
 
 function k::use::namespace::get() {
-    K_USE_CURRENT_NAMESPACE=$(kubectl config view --raw -o jsonpath='{.contexts[?(@.name == "'"${K_USE_CURRENT_CONTEXT}"'")].context.namespace}' 2>/dev/null)
-    if [ -z "${K_USE_CURRENT_NAMESPACE}" ]
+    if [ "${K_USE_CURRENT_CONTEXT}" == "N/A" ]
     then
-        K_USE_CURRENT_NAMESPACE="default"
+        K_USE_CURRENT_NAMESPACE="N/A"
+        return 0
     fi
+
+    K_USE_CURRENT_NAMESPACE=$(kubectl config view --raw -o jsonpath='{.contexts[?(@.name == "'"${K_USE_CURRENT_CONTEXT}"'")].context.namespace}' 2>/dev/null)
+    [ -n "${K_USE_CURRENT_NAMESPACE}" ] || K_USE_CURRENT_NAMESPACE="default"
 }
 
 function k::use::main() {
