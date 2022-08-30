@@ -89,13 +89,13 @@ function k::use::arguments() {
 }
 
 function k::use::actions() {
-    if [ "${K_USE_USAGE}" == "true" ]
+    if [ "${K_USE_USAGE}" = "true" ]
     then
         k::use::usage
         return 1
     fi
 
-    if [ "${K_USE_QUIT}" == "true" ]
+    if [ "${K_USE_QUIT}" = "true" ]
     then
         k::use::quit
         return 1
@@ -167,10 +167,9 @@ function k::use::ps1() {
     k::use::context::get
     k::use::namespace::get
 
-    local kubeconfig_file_name=$(echo -n "${KUBECONFIG}" | awk -F '/' 'NR == 1 { print $NF }')
-
     [ -n "${K_USE_ORIGINAL_PS1}" ] || export K_USE_ORIGINAL_PS1="${PS1}"
 
+    local kubeconfig_file_name=$(echo -n "${KUBECONFIG}" | awk -F '/' 'NR == 1 { print $NF }')
     export PS1="${K_USE_PS1_BG_RED}(${kubeconfig_file_name}:${K_USE_CURRENT_NAMESPACE})${K_USE_PS1_BG_RESET}${K_USE_ORIGINAL_PS1}"
 }
 
@@ -180,7 +179,7 @@ function k::use::context::get() {
 }
 
 function k::use::namespace::get() {
-    if [ "${K_USE_CURRENT_CONTEXT}" == "N/A" ]
+    if [ "${K_USE_CURRENT_CONTEXT}" = "N/A" ]
     then
         K_USE_CURRENT_NAMESPACE="N/A"
         return 0
